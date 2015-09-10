@@ -1,18 +1,12 @@
-package proxydialer
+package proxydial
 
 import (
-	"encoding/json"
+	"io/ioutil"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
-
-type httpbinGetResponse struct {
-	Args    map[string]interface{} `json:"args"`
-	Headers map[string]string      `json:"headers"`
-	Origin  string                 `json:"origin"`
-	URL     string                 `json:"url"`
-}
 
 var client = http.Client{
 	Transport: &http.Transport{
@@ -24,17 +18,21 @@ var client = http.Client{
 
 func TestDialer(t *testing.T) {
 
-	response, err := client.Get("https://httpbin.org/get")
+	response, err := client.Get("http://proxydial.herokuapp.com/remote")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	body := httpbinGetResponse{}
-	json.NewDecoder(response.Body).Decode(&body)
 	defer response.Body.Close()
 
-	if body.URL != "https://httpbin.org/get" {
-		t.Fatalf("body.Url %s ", body.Url)
+	bytes, err := ioutil.ReadAll(response.Body)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(bytes) != "DONE" {
+		t.Fatal(bytes)
 	}
 }
 
@@ -53,19 +51,40 @@ func TestLocalHost(t *testing.T) {
 }
 
 func TestBlockedIPv4(t *testing.T) {
+	_, err := client.Get("http://10.1.1.2/")
+	if err == nil || err.Error() != "Get http://10.1.1.2/: dialer.Dial 10.1.1.2:80: blocked range (10.1.1.2)" {
+		t.Error(err)
+	}
+}
 
+func TestBlockedIPv6(t *testing.T) {
+	_, err := client.Get("http://[fe80::1]/")
+	if err == nil || err.Error() != "Get http://[fe80::1]/: dialer.Dial [fe80::1]:80: blocked range (fe80::1)" {
+		t.Error(err)
+	}
 }
 
 func TestRedirects(t *testing.T) {
 
-}
+	tests := map[string]string{
+		"https://proxydial.herokuapp.com/file":    "unsupported protocol scheme",
+		"https://proxydial.herokuapp.com/local":   "blocked range",
+		"https://proxydial.herokuapp.com/v6":      "blocked range",
+		"https://proxydial.herokuapp.com/port":    "blocked port",
+		"https://proxydial.herokuapp.com/recurse": "stopped after 10 redirects",
+	}
 
-func TestBlockedIPv6(t *testing.T) {
+	for url, errmsg := range tests {
+		_, err := client.Get(url)
 
-}
+		if err == nil {
+			t.Errorf("successfully fetched %s", url)
 
-func TestTimeouts(t *testing.T) {
-
+		}
+		if !strings.Contains(err.Error(), errmsg) {
+			t.Error(err)
+		}
+	}
 }
 
 func TestResolutionFailure(t *testing.T) {

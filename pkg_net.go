@@ -1,4 +1,4 @@
-package proxydialer
+package proxydial
 
 // Everything in this file was copy-pasted from go/src/net (v1.5)
 import "net"

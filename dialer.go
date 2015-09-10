@@ -1,4 +1,23 @@
-package proxydialer
+// Package proxydial provides a replacement for Go's builtin net.Dialer that
+// is designed to be used in applications where you're proxying a user's request,
+// or more generally making requests to URLs that you don't necessarily trust
+// completely.
+//
+// Usually you will use the Dial function in an HTTP Client as follows:
+//
+//     client := http.Client{
+//         Transport: &http.Transport{
+//              Proxy: http.ProxyFromEnvironment,
+//				Dial: proxydialer.Dial,
+//              TLSHandshakeTimeout: 10 * time.Second
+//         }
+//     }
+//
+// The advantage of the proxydialer is that it prevents connections being made to
+// internal IP addresses (e.g. 127.0.0.1, or 169.254.169.254) or to ports that could
+// cause harm to the rest of the internet (e.g. 22, 25).
+//
+package proxydial
 
 import (
 	"fmt"
@@ -12,13 +31,18 @@ import (
 // not to AllowedPorts, or to BlockedRanges are aborted. It also does not yet support
 // HappyEyeballs.
 type Dialer struct {
-	// AllowedNets is a whitelist of nets that connections may be made over
+	// AllowedNets is a whitelist of nets that connections may be made over. For http
+	// this should be only []string{"tcp"}
 	AllowedNets []string
 
-	// AllowedPorts is a whitelist of ports that connections may be made to
+	// AllowedPorts is a whitelist of ports that connections may be made to. For http
+	// the usual suspects would be []int16{80, 443}, but some other ports are used
+	// fairly frequently.
 	AllowedPorts []int16
 
 	// BlockedRanges is a black list of IP ranges that connections may not be made to
+	// This should usually include net.ParseCIDR("127.0.0.1/8") to prevent connections
+	// to localhost, in addition to any other subnets that you use internally.
 	BlockedRanges []*net.IPNet
 
 	// Timeout is the maximum amount of time a dial will wait for
@@ -67,7 +91,8 @@ func cidrRange(str string) *net.IPNet {
 // DefaultDialer is a proxydialer designed for HTTP. It prevents connections to
 // non-standard HTTP ports and internal IP addresses.
 var DefaultDialer = Dialer{
-	AllowedNets:  []string{"tcp"},
+	AllowedNets: []string{"tcp"},
+	// Allow for the fairly common 8080 and 8443 ports too.
 	AllowedPorts: []int16{80, 443, 8080, 8443},
 	// From https://en.wikipedia.org/wiki/Reserved_IP_addresses
 	BlockedRanges: []*net.IPNet{
@@ -89,7 +114,7 @@ var DefaultDialer = Dialer{
 		cidrRange("255.255.255.255/32"),
 		cidrRange("::/128"),
 		cidrRange("::1/128"),
-		// cidrRange("::ffff:0:0/96"), IPv4 equivalents
+		// cidrRange("::ffff:0:0/96"), IPv4 equivalents.
 		cidrRange("100::/64"),
 		cidrRange("64:ff9b::/96"),
 		cidrRange("2001::/32"),
