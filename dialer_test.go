@@ -1,6 +1,7 @@
 package proxydial
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -18,7 +19,8 @@ var client = http.Client{
 
 func TestDialer(t *testing.T) {
 
-	response, err := client.Get("http://proxydial.herokuapp.com/remote")
+	// TODO: remove network request
+	response, err := client.Get("http://example.com/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,57 +33,51 @@ func TestDialer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(bytes) != "DONE" {
-		t.Fatal(bytes)
+	if !strings.Contains(string(bytes), "<html>") {
+		t.Fatal(string(bytes))
 	}
 }
 
 func TestBlockedPorts(t *testing.T) {
 	_, err := client.Get("https://httpbin.org:25/get")
-	if err == nil || err.Error() != "Get https://httpbin.org:25/get: dialer.Dial httpbin.org:25: blocked port" {
+	if err == nil || err.Error() != `Get "https://httpbin.org:25/get": dialer.Dial httpbin.org:25: blocked port` {
 		t.Fatal(err)
 	}
 }
 
 func TestLocalHost(t *testing.T) {
 	_, err := client.Get("http://localhost/")
-	if err == nil || err.Error() != "Get http://localhost/: dialer.Dial localhost:80: blocked range (::1)" {
+	if err == nil || err.Error() != `Get "http://localhost/": dialer.Dial localhost:80: blocked range (::1)` {
 		t.Error(err)
 	}
 }
 
 func TestBlockedIPv4(t *testing.T) {
 	_, err := client.Get("http://10.1.1.2/")
-	if err == nil || err.Error() != "Get http://10.1.1.2/: dialer.Dial 10.1.1.2:80: blocked range (10.1.1.2)" {
+	if err == nil || err.Error() != `Get "http://10.1.1.2/": dialer.Dial 10.1.1.2:80: blocked range (10.1.1.2)` {
 		t.Error(err)
 	}
 }
 
 func TestBlockedIPv6(t *testing.T) {
 	_, err := client.Get("http://[fe80::1]/")
-	if err == nil || err.Error() != "Get http://[fe80::1]/: dialer.Dial [fe80::1]:80: blocked range (fe80::1)" {
+	if err == nil || err.Error() != `Get "http://[fe80::1]/": dialer.Dial [fe80::1]:80: blocked range (fe80::1)` {
 		t.Error(err)
 	}
 }
 
-func TestRedirects(t *testing.T) {
+func TestBlocks(t *testing.T) {
+	for _, ip := range []string{
+		"169.254.0.1",
+		"[::]",
+		"0x7f000001",           // hex
+		"2130706433",           // decimal
+		"000127.0.00000.00001", // leading zeros
+	} {
+		requiredPrefix := fmt.Sprintf(`Get "http://%s/": dialer.Dial %s:80: blocked`, ip, ip)
+		_, err := client.Get(fmt.Sprintf("http://%s/", ip))
 
-	tests := map[string]string{
-		"https://proxydial.herokuapp.com/file":    "unsupported protocol scheme",
-		"https://proxydial.herokuapp.com/local":   "blocked range",
-		"https://proxydial.herokuapp.com/v6":      "blocked range",
-		"https://proxydial.herokuapp.com/port":    "blocked port",
-		"https://proxydial.herokuapp.com/recurse": "stopped after 10 redirects",
-	}
-
-	for url, errmsg := range tests {
-		_, err := client.Get(url)
-
-		if err == nil {
-			t.Errorf("successfully fetched %s", url)
-
-		}
-		if !strings.Contains(err.Error(), errmsg) {
+		if err == nil || !strings.HasPrefix(err.Error(), requiredPrefix) {
 			t.Error(err)
 		}
 	}

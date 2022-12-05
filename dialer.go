@@ -45,8 +45,17 @@ type Dialer struct {
 	// to localhost, in addition to any other subnets that you use internally.
 	BlockedRanges []*net.IPNet
 
+	// BlockPrivate blocks any IP on a private network
+	BlockPrivate bool
+	// BlockLinkLocal blocks any IP on a link local network
+	BlockLinkLocal bool
+	// BlockMulticast blocks any IP on a multicast network
+	BlockMulticast bool
+	// BlockUnspecified blocks any unspecified IP
+	BlockUnspecified bool
+
 	// Timeout is the maximum amount of time a dial will wait for
-	// a connect to complete. If Deadline is also set, it may fail
+	// a connection to complete. If Deadline is also set, it may fail
 	// earlier.
 	//
 	// The default is no timeout.
@@ -100,7 +109,7 @@ var DefaultDialer = Dialer{
 		cidrRange("10.0.0.0/8"),
 		cidrRange("100.64.0.0/10"),
 		cidrRange("127.0.0.0/8"),
-		cidrRange("169.24.0.0/16"),
+		cidrRange("169.254.0.0/16"),
 		cidrRange("172.16.0.0/12"),
 		cidrRange("192.0.0.0/24"),
 		cidrRange("192.0.2.0/24"),
@@ -113,7 +122,7 @@ var DefaultDialer = Dialer{
 		cidrRange("240.0.0.0/4"),
 		cidrRange("255.255.255.255/32"),
 		cidrRange("::/128"),
-		cidrRange("::1/128"),
+		cidrRange("::1/128"), // IPv6 loopback
 		// cidrRange("::ffff:0:0/96"), IPv4 equivalents.
 		cidrRange("100::/64"),
 		cidrRange("64:ff9b::/96"),
@@ -122,13 +131,17 @@ var DefaultDialer = Dialer{
 		cidrRange("2001:20::/28"),
 		cidrRange("2001:db8::/32"),
 		cidrRange("2002::/16"),
-		cidrRange("fc00::/7"),
-		cidrRange("fe80::/10"),
-		cidrRange("ff00::/8"),
+		cidrRange("fc00::/7"),  // IPv6 unique local addr
+		cidrRange("fe80::/10"), // IPv6 link-local
+		cidrRange("ff00::/8"),  // IPv6 multicast
 	},
+	BlockMulticast:   true,
+	BlockPrivate:     true,
+	BlockLinkLocal:   true,
+	BlockUnspecified: true,
 }
 
-// Dial creats a connection to the given address using DefaultDialer.Dial
+// Dial creates a connection to the given address using DefaultDialer.Dial
 func Dial(network, addr string) (net.Conn, error) {
 	return DefaultDialer.Dial(network, addr)
 }
@@ -153,6 +166,22 @@ func (d *Dialer) allowedPort(port int16) bool {
 }
 
 func (d *Dialer) allowedIP(ip net.IP) bool {
+	if d.BlockPrivate && (ip.IsPrivate() || ip.IsLoopback()) {
+		return false
+	}
+
+	if d.BlockLinkLocal && (ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+		return false
+	}
+
+	if d.BlockMulticast && (ip.IsMulticast() || ip.IsInterfaceLocalMulticast()) {
+		return false
+	}
+
+	if d.BlockUnspecified && ip.IsUnspecified() {
+		return false
+	}
+
 	for _, netrange := range d.BlockedRanges {
 		if netrange.Contains(ip) {
 			return false
